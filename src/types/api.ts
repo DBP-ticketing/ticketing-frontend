@@ -31,6 +31,7 @@ export interface QueueStatus {
 
 export interface Booking {
   bookingId: number;
+  eventId?: number; // 추가
   eventName: string;
   section: string;
   seatRow?: number;
@@ -64,6 +65,15 @@ export interface SignUpRequest {
   password: string;
   name: string;
   phoneNumber: string;
+}
+
+export interface SignUpHostRequest {
+  email: string;
+  password: string;
+  name: string;
+  phoneNumber: string;
+  companyName: string;
+  businessNumber: string;
 }
 
 export interface LoginResponse {

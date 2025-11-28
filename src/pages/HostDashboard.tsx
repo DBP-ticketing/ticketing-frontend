@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { eventApi, placeApi } from '../services/api';
+import { useAuthStore } from '../store/authStore';
 import type { Event } from '../types/api';
 import toast from 'react-hot-toast';
 import Loading from '../components/Loading';
@@ -32,6 +33,7 @@ export default function HostDashboard() {
 function EventsTab() {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuthStore();
 
   useEffect(() => {
     fetchEvents();
@@ -39,8 +41,7 @@ function EventsTab() {
 
   const fetchEvents = async () => {
     try {
-      const response = await eventApi.getEvents();
-      // 현재 로그인한 호스트의 이벤트만 필터링 (실제로는 백엔드에서 필터링해야 함)
+      const response = await eventApi.getMyHostEvents();
       setEvents(response.data);
     } catch (error) {
       console.error('Failed to fetch events:', error);
@@ -62,14 +63,11 @@ function EventsTab() {
     return <span className={`px-3 py-1 rounded-full text-sm font-medium ${badge.bg} ${badge.text}`}>{badge.label}</span>;
   };
 
-  // [최종 수정된 formatDate 함수]
   const formatDate = (dateString: string | null | undefined) => {
     if (!dateString) {
-        // dateString이 null, undefined, 또는 빈 문자열일 경우 바로 반환
         return '날짜 정보 없음'; 
     }
     
-    // 날짜/시간 사이의 공백을 'T'로 대체하여 ISO 8601 형식으로 변환
     const isoString = dateString.replace(' ', 'T'); 
     const date = new Date(isoString);
 
@@ -80,7 +78,6 @@ function EventsTab() {
 
     return date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
-  // -------------------------
 
   if (loading) return <Loading />;
 
@@ -98,7 +95,6 @@ function EventsTab() {
       ) : (
         <div className="space-y-4">
           {events.map((event) => {
-            // map 내부에 event 객체 자체가 null/undefined인 경우를 대비한 안전 체크
             if (!event) return null; 
 
             return (
@@ -147,13 +143,11 @@ function CreateEventTab() {
     console.log('Response data:', response.data);
     
     if (response.data && Array.isArray(response.data)) {
-      // response.data가 직접 배열인 경우
       setPlaces(response.data.map((place: any) => ({
         placeId: place.placeId,
         placeName: place.placeName
       })));
     } else if (response.data && response.data.data && Array.isArray(response.data.data)) {
-      // response.data.data가 배열인 경우
       setPlaces(response.data.data.map((place: any) => ({
         placeId: place.placeId,
         placeName: place.placeName
@@ -179,7 +173,6 @@ function CreateEventTab() {
       return;
     }
 
-    // 실제 구현에서는 좌석 설정도 함께 전송해야 합니다
     const eventData = {
       placeId: Number(formData.placeId),
       eventName: formData.eventName,
@@ -187,7 +180,6 @@ function CreateEventTab() {
       date: formData.date,
       ticketingStartAt: formData.ticketingStartAt,
       seatForm: formData.seatForm,
-      // 임시로 백엔드 EventService.java의 간소화된 로직을 만족시키기 위한 단일 설정
       seatSettings: [
         { sectionName: 'A', seatLevel: 'VIP', price: 100000 },
       ],
@@ -197,7 +189,6 @@ function CreateEventTab() {
     try {
       await eventApi.createEvent(eventData);
       toast.success('이벤트가 생성되었습니다!');
-      // 성공 후 폼 초기화
       setFormData({
         placeId: '',
         eventName: '',

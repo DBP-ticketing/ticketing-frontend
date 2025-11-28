@@ -70,7 +70,13 @@ export default function SignUp() {
             </button>
           </form>
 
-          <div className="mt-6 text-center">
+          <div className="mt-6 text-center space-y-2">
+            <p className="text-gray-600">
+              이벤트를 주최하시나요?{' '}
+              <Link to="/signup/host" className="text-primary font-medium hover:underline">
+                호스트 회원가입
+              </Link>
+            </p>
             <p className="text-gray-600">
               이미 계정이 있으신가요?{' '}
               <Link to="/login" className="text-primary font-medium hover:underline">로그인</Link>
