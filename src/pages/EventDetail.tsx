@@ -45,8 +45,18 @@ export default function EventDetail() {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
+const formatDate = (dateString: string) => {
+    // 1. 공백을 'T'로 대체하여 ISO 8601 형식으로 변환합니다.
+    const isoString = dateString.replace(' ', 'T');
+    const date = new Date(isoString);
+
+    // 2. 파싱 오류 확인
+    if (isNaN(date.getTime())) {
+      console.error(`Invalid Date string received: ${dateString}`);
+      return `날짜 형식 오류: ${dateString}`; 
+    }
+
+    // 3. 정상적인 반환
     return date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 

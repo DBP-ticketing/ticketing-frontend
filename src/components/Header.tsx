@@ -34,7 +34,7 @@ export default function Header() {
           {/* Logo */}
           <Link to="/" className="flex items-center space-x-2">
             <img src="/logo.png" alt="MOL" className="w-10 h-10 rounded-lg" />
-            <span className="text-xl font-bold text-gray-900">ticket</span>
+            <span className="text-xl font-bold text-gray-900">Ticket</span>
           </Link>
 
           {/* Navigation */}

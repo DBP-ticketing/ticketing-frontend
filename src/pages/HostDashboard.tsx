@@ -62,10 +62,25 @@ function EventsTab() {
     return <span className={`px-3 py-1 rounded-full text-sm font-medium ${badge.bg} ${badge.text}`}>{badge.label}</span>;
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
+  // [최종 수정된 formatDate 함수]
+  const formatDate = (dateString: string | null | undefined) => {
+    if (!dateString) {
+        // dateString이 null, undefined, 또는 빈 문자열일 경우 바로 반환
+        return '날짜 정보 없음'; 
+    }
+    
+    // 날짜/시간 사이의 공백을 'T'로 대체하여 ISO 8601 형식으로 변환
+    const isoString = dateString.replace(' ', 'T'); 
+    const date = new Date(isoString);
+
+    if (isNaN(date.getTime())) {
+      console.error(`Invalid Date string received: ${dateString}`);
+      return `날짜 형식 오류: ${dateString}`; 
+    }
+
     return date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
+  // -------------------------
 
   if (loading) return <Loading />;
 
@@ -82,21 +97,26 @@ function EventsTab() {
         </div>
       ) : (
         <div className="space-y-4">
-          {events.map((event) => (
-            <div key={event.eventId} className="border rounded-lg p-6 hover:shadow-md transition">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">{event.eventName}</h3>
-                  <div className="space-y-1 text-sm text-gray-600">
-                    <p>장소: {event.placeName}</p>
-                    <p>공연 일시: {formatDate(event.date)}</p>
-                    <p>예매 시작: {formatDate(event.ticketingStartAt)}</p>
+          {events.map((event) => {
+            // map 내부에 event 객체 자체가 null/undefined인 경우를 대비한 안전 체크
+            if (!event) return null; 
+
+            return (
+              <div key={event.eventId} className="border rounded-lg p-6 hover:shadow-md transition">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900 mb-2">{event.eventName}</h3>
+                    <div className="space-y-1 text-sm text-gray-600">
+                      <p>장소: {event.placeName ?? '장소 정보 없음'}</p>
+                      <p>공연 일시: {formatDate(event.date)}</p>
+                      <p>예매 시작: {formatDate(event.ticketingStartAt)}</p>
+                    </div>
                   </div>
+                  {getStatusBadge(event.status)}
                 </div>
-                {getStatusBadge(event.status)}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -167,6 +187,7 @@ function CreateEventTab() {
       date: formData.date,
       ticketingStartAt: formData.ticketingStartAt,
       seatForm: formData.seatForm,
+      // 임시로 백엔드 EventService.java의 간소화된 로직을 만족시키기 위한 단일 설정
       seatSettings: [
         { sectionName: 'A', seatLevel: 'VIP', price: 100000 },
       ],
@@ -176,6 +197,7 @@ function CreateEventTab() {
     try {
       await eventApi.createEvent(eventData);
       toast.success('이벤트가 생성되었습니다!');
+      // 성공 후 폼 초기화
       setFormData({
         placeId: '',
         eventName: '',
