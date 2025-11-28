@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { eventApi, queueApi } from '../services/api';
+import { eventApi, queueApi, seatApi } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import type { EventDetail } from '../types/api';
 import Loading from '../components/Loading';
@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 export default function EventDetail() {
   const { eventId } = useParams<{ eventId: string }>();
   const [event, setEvent] = useState<EventDetail | null>(null);
+  const [availableSeats, setAvailableSeats] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const { isAuthenticated } = useAuthStore();
   const navigate = useNavigate();
@@ -21,6 +22,11 @@ export default function EventDetail() {
     try {
       const response = await eventApi.getEventDetail(Number(eventId));
       setEvent(response.data);
+      
+      // 좌석 정보 조회하여 예매 가능한 좌석 수 계산
+      const seatsResponse = await seatApi.getSeats(Number(eventId));
+      const available = seatsResponse.data.filter(seat => seat.status === 'AVAILABLE').length;
+      setAvailableSeats(available);
     } catch (error) {
       console.error('Failed to fetch event:', error);
       toast.error('이벤트 정보를 불러오는데 실패했습니다');
@@ -45,19 +51,25 @@ export default function EventDetail() {
     }
   };
 
-const formatDate = (dateString: string) => {
-    // 1. 공백을 'T'로 대체하여 ISO 8601 형식으로 변환합니다.
+  const formatDate = (dateString: string) => {
     const isoString = dateString.replace(' ', 'T');
     const date = new Date(isoString);
 
-    // 2. 파싱 오류 확인
     if (isNaN(date.getTime())) {
       console.error(`Invalid Date string received: ${dateString}`);
-      return `날짜 형식 오류: ${dateString}`; 
+      return `날짜 형식 오류: ${dateString}`;
     }
 
-    // 3. 정상적인 반환
     return date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getSeatFormLabel = (seatForm: string) => {
+    const labels: Record<string, string> = {
+      ASSIGNED: '지정좌석',
+      FREE: '자유좌석',
+      STANDING: '스탠딩'
+    };
+    return labels[seatForm] || seatForm;
   };
 
   if (loading) return <Loading />;
@@ -74,6 +86,9 @@ const formatDate = (dateString: string) => {
                 {event.status === 'OPEN' ? '예매 중' : '예매 전'}
               </span>
               <span className="text-gray-600">{event.category}</span>
+              <span className="px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-700">
+                {getSeatFormLabel(event.seatForm)}
+              </span>
             </div>
           </div>
           <div className="space-y-6">
@@ -93,11 +108,38 @@ const formatDate = (dateString: string) => {
               <svg className="w-6 h-6 text-gray-400 mr-4 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               <div><p className="text-sm text-gray-500">예매 시작</p><p className="text-lg font-medium text-gray-900">{formatDate(event.ticketingStartAt)}</p></div>
             </div>
+            
+            {/* 예매 가능 좌석 수 표시 */}
+            {event.status === 'OPEN' && (
+              <div className="flex items-start">
+                <svg className="w-6 h-6 text-gray-400 mr-4 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                <div>
+                  <p className="text-sm text-gray-500">예매 가능</p>
+                  <p className="text-lg font-medium text-gray-900">
+                    <span className={availableSeats > 0 ? 'text-green-600' : 'text-red-600'}>
+                      {availableSeats}석
+                    </span>
+                    {availableSeats === 0 && <span className="ml-2 text-red-600 text-sm">(매진)</span>}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
-          {event.status === 'OPEN' && (
+          {event.status === 'OPEN' && availableSeats > 0 && (
             <div className="mt-8 pt-6 border-t">
               <button onClick={handleJoinQueue} className="btn-primary w-full text-lg py-4">예매하기</button>
-              <p className="text-center text-sm text-gray-500 mt-4">대기열에 등록한 후 순서대로 입장합니다</p>
+              <p className="text-center text-sm text-gray-500 mt-4">
+                {event.seatForm === 'ASSIGNED' 
+                  ? '대기열에 등록한 후 순서대로 입장하여 좌석을 선택합니다'
+                  : '대기열에 등록한 후 순서대로 입장하여 예매합니다 (좌석은 자동 배정)'}
+              </p>
+            </div>
+          )}
+          {event.status === 'OPEN' && availableSeats === 0 && (
+            <div className="mt-8 pt-6 border-t">
+              <div className="bg-red-100 rounded-lg p-4 text-center">
+                <p className="text-red-700 font-medium">매진되었습니다</p>
+              </div>
             </div>
           )}
           {event.status === 'SCHEDULED' && (
