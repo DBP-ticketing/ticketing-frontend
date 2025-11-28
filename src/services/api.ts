@@ -149,7 +149,7 @@ export const adminApi = {
 
 export const placeApi = {
   getAllPlaces: () =>
-    api.get<ApiResponse<Place[]>>('/place'),
+    api.get<Place[]>('/place'),
   
   createPlace: (data: any) =>
     api.post<number>('/place/create', data),

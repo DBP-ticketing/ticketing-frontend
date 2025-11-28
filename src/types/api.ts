@@ -31,7 +31,7 @@ export interface QueueStatus {
 
 export interface Booking {
   bookingId: number;
-  eventId?: number; // 추가
+  eventId?: number;
   eventName: string;
   section: string;
   seatRow?: number;
@@ -99,7 +99,7 @@ export interface Place {
   placeId: number;
   placeName: string;
   address: string;
-  sections: PlaceSection[];
+  sections?: PlaceSection[];
 }
 
 export interface PlaceSection {
