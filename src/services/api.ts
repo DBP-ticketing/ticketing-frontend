@@ -159,6 +159,10 @@ export const placeApi = {
   
   deletePlace: (placeId: number) =>
     api.delete(`/place/${placeId}`),
+
+  // 백엔드에 새로 추가된 API 호출
+  getPlaceSections: (placeId: number) =>
+    api.get<string[]>(`/place/${placeId}/sections`),
 };
 
 export default api;

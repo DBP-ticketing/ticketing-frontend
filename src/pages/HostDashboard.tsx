@@ -1,10 +1,32 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { eventApi, placeApi } from '../services/api';
+import { eventApi, placeApi } from '../services/api'; 
 import { useAuthStore } from '../store/authStore';
 import type { Event } from '../types/api';
 import toast from 'react-hot-toast';
 import Loading from '../components/Loading';
+
+// 백엔드 CreateEventRequestDto.java의 SectionSetting과 일치하는 인터페이스 정의
+interface SectionSetting {
+  sectionName: string;
+  seatLevel: 'VIP' | 'R' | 'S' | 'A' | 'B' | 'DEFAULT' | string; 
+  price: number;
+}
+
+// 이벤트 생성 폼 데이터 인터페이스 업데이트
+interface CreateEventFormData {
+  placeId: string;
+  eventName: string;
+  category: string;
+  date: string;
+  ticketingStartAt: string;
+  // 백엔드 Enum에 맞게 SeatForm 타입 업데이트
+  seatForm: 'ASSIGNED' | 'FREE' | 'STANDING';
+  seatSettings: SectionSetting[]; // 구역 설정 리스트
+}
+
+// SeatLevel Enum 값 (백엔드 SeatLevel.java 기준 추정)
+const seatLevels: SectionSetting['seatLevel'][] = ['VIP', 'R', 'S', 'A', 'B', 'DEFAULT'];
 
 export default function HostDashboard() {
   const [activeTab, setActiveTab] = useState<'events' | 'create'>('events');
@@ -118,44 +140,42 @@ function EventsTab() {
     </div>
   );
 }
+// --------------------------------------------------------------------------------------------------
 
 function CreateEventTab() {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<CreateEventFormData>({
     placeId: '',
     eventName: '',
     category: 'CONCERT',
     date: '',
     ticketingStartAt: '',
     seatForm: 'ASSIGNED',
+    seatSettings: [], // 초기에는 빈 배열
   });
   const [places, setPlaces] = useState<{ placeId: number; placeName: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingPlaces, setLoadingPlaces] = useState(true);
+  const [loadingSections, setLoadingSections] = useState(false);
 
+  // 장소 목록 불러오기
   useEffect(() => {
     fetchPlaces();
   }, []);
 
   const fetchPlaces = async () => {
-  try {
-    const response = await placeApi.getAllPlaces();
-    console.log('Place API full response:', response);
-    console.log('Response data:', response.data);
-    
-    if (response.data && Array.isArray(response.data)) {
-      setPlaces(response.data.map((place: any) => ({
+    try {
+      const response = await placeApi.getAllPlaces();
+      let placeData: any[] = [];
+      if (response.data && Array.isArray(response.data)) {
+        placeData = response.data;
+      } else if (response.data && response.data.data && Array.isArray(response.data.data)) {
+        placeData = response.data.data;
+      } 
+  
+      setPlaces(placeData.map((place: any) => ({
         placeId: place.placeId,
         placeName: place.placeName
       })));
-    } else if (response.data && response.data.data && Array.isArray(response.data.data)) {
-      setPlaces(response.data.data.map((place: any) => ({
-        placeId: place.placeId,
-        placeName: place.placeName
-      })));
-    } else {
-      console.error('Unexpected response structure:', response.data);
-      setPlaces([]);
-    }
     } catch (error) {
       console.error('Failed to fetch places:', error);
       toast.error('장소 목록을 불러오는데 실패했습니다');
@@ -165,13 +185,131 @@ function CreateEventTab() {
     }
   };
 
+  // 장소 ID로 해당 장소의 구역 목록을 가져오는 함수 (실제 API 호출)
+  const fetchPlaceSections = useCallback(async (placeId: number): Promise<string[]> => {
+    setLoadingSections(true);
+    try {
+      // placeApi에 추가된 getPlaceSections 호출
+      const response = await placeApi.getPlaceSections(placeId);
+      return response.data || [];
+    } catch (error) {
+      console.error('Failed to fetch place sections:', error);
+      toast.error('장소 구역 정보를 불러오는데 실패했습니다. 장소에 좌석 템플릿이 설정되었는지 확인하세요.');
+      return [];
+    } finally {
+      setLoadingSections(false);
+    }
+  }, []);
+
+
+  // 좌석 구역 설정 변경 핸들러 (등급 및 가격만 변경 가능)
+  const handleSeatSettingChange = (
+    index: number, 
+    field: 'seatLevel' | 'price', 
+    value: string | number
+  ) => {
+    const newSettings = [...formData.seatSettings];
+    newSettings[index] = { 
+      ...newSettings[index], 
+      [field]: field === 'price' ? Number(value) : String(value) 
+    };
+    setFormData({ ...formData, seatSettings: newSettings });
+  };
+
+  // 장소 선택 변경 핸들러
+  const handlePlaceChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newPlaceId = e.target.value;
+    
+    // 장소 ID 업데이트 및 기존 설정 초기화
+    setFormData(prev => ({ 
+      ...prev, 
+      placeId: newPlaceId, 
+      // 장소가 변경되면 ('ASSIGNED'일 경우) 구역 목록을 다시 로드해야 하므로 초기화
+      seatSettings: prev.seatForm === 'ASSIGNED' ? [] : prev.seatSettings,
+    }));
+
+    if (newPlaceId && formData.seatForm === 'ASSIGNED') {
+      const id = Number(newPlaceId);
+      const sectionNames = await fetchPlaceSections(id);
+
+      // 가져온 구역명으로 seatSettings 초기화
+      const initialSettings: SectionSetting[] = sectionNames.map(sectionName => ({
+        sectionName: sectionName,
+        seatLevel: 'S', // 기본 등급 설정
+        price: 50000,   // 기본 가격 설정
+      }));
+
+      setFormData(prev => ({
+        ...prev,
+        seatSettings: initialSettings,
+      }));
+
+      if (sectionNames.length === 0) {
+        toast('선택한 장소에 구역 정보가 없습니다. 장소 설정을 확인해주세요.', { icon: '⚠️' });
+      }
+    } else {
+
+        setFormData(prev => ({ ...prev, seatSettings: [] }));
+    }
+  };
+
+  // 좌석 형태 변경 핸들러 (새로 추가)
+  const handleSeatFormChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newSeatForm = e.target.value as CreateEventFormData['seatForm'];
+    
+    setFormData(prev => ({ 
+        ...prev, 
+        seatForm: newSeatForm,
+
+        seatSettings: newSeatForm === 'ASSIGNED' ? prev.seatSettings : [],
+    }));
+
+
+    if (newSeatForm === 'ASSIGNED' && formData.placeId) {
+        const id = Number(formData.placeId);
+        const sectionNames = await fetchPlaceSections(id);
+
+        const initialSettings: SectionSetting[] = sectionNames.map(sectionName => ({
+            sectionName: sectionName,
+            seatLevel: 'S', 
+            price: 50000,
+        }));
+
+        setFormData(prev => ({
+            ...prev,
+            seatSettings: initialSettings,
+            seatForm: newSeatForm,
+        }));
+    }
+  };
+
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // 유효성 검사
     if (!formData.placeId || !formData.eventName || !formData.date || !formData.ticketingStartAt) {
-      toast.error('모든 필드를 입력해주세요');
+      toast.error('이벤트 기본 정보를 모두 입력해주세요');
       return;
     }
+    
+
+    if (formData.seatForm === 'ASSIGNED') {
+      const invalidSetting = formData.seatSettings.some(setting => 
+        !setting.sectionName.trim() || setting.price === null || setting.price === undefined || setting.price < 0
+      );
+
+      if (formData.seatSettings.length === 0) {
+        toast.error('장소를 선택하고 구역 정보를 로드한 후, 가격 설정을 완료해주세요.');
+        return;
+      }
+
+      if (invalidSetting) {
+        toast.error('좌석 구역의 등급과 0원 이상의 가격은 필수입니다.');
+        return;
+      }
+    }
+
 
     const eventData = {
       placeId: Number(formData.placeId),
@@ -180,15 +318,16 @@ function CreateEventTab() {
       date: formData.date,
       ticketingStartAt: formData.ticketingStartAt,
       seatForm: formData.seatForm,
-      seatSettings: [
-        { sectionName: 'A', seatLevel: 'VIP', price: 100000 },
-      ],
+
+      // 백엔드 DTO가 List<SectionSetting>을 요구하므로 빈 배열을 보냅니다.
+      seatSettings: formData.seatSettings,
     };
 
     setLoading(true);
     try {
       await eventApi.createEvent(eventData);
       toast.success('이벤트가 생성되었습니다!');
+      // 성공 후 폼 초기화
       setFormData({
         placeId: '',
         eventName: '',
@@ -196,81 +335,165 @@ function CreateEventTab() {
         date: '',
         ticketingStartAt: '',
         seatForm: 'ASSIGNED',
+        seatSettings: [],
       });
     } catch (error: any) {
       console.error('Failed to create event:', error);
-      toast.error(error.response?.data?.message || '이벤트 생성에 실패했습니다');
+      // 서버에서 500 에러가 아닌 4xx 에러로 처리했다면 메시지를 표시
+      toast.error(error.response?.data?.message || '이벤트 생성에 실패했습니다'); 
     } finally {
       setLoading(false);
     }
   };
 
+  const isSeatSettingRequired = formData.seatForm === 'ASSIGNED';
+  const isSeatSettingDisabled = !formData.placeId || loadingSections;
+
+
   return (
     <div className="card">
       <h2 className="text-2xl font-bold mb-6">새 이벤트 생성</h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">이벤트명</label>
-          <input type="text" value={formData.eventName} onChange={(e) => setFormData({ ...formData, eventName: e.target.value })} className="input" placeholder="예: BTS 콘서트" />
-        </div>
-        
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">장소 선택</label>
-          {loadingPlaces ? (
-            <div className="input bg-gray-100">로딩 중...</div>
-          ) : (
-            <select value={formData.placeId} onChange={(e) => setFormData({ ...formData, placeId: e.target.value })} className="input" required>
-              <option value="">장소를 선택하세요</option>
-              {places.map((place) => (
-                <option key={place.placeId} value={place.placeId}>
-                  {place.placeName}
-                </option>
-              ))}
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* 이벤트 기본 정보 */}
+        <div className="space-y-4 border-b pb-6">
+          <h3 className="text-xl font-semibold text-gray-800">1. 이벤트 기본 정보</h3>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">이벤트명</label>
+            <input type="text" value={formData.eventName} onChange={(e) => setFormData({ ...formData, eventName: e.target.value })} className="input" placeholder="예: BTS 콘서트" />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">장소 선택</label>
+            {loadingPlaces ? (
+              <div className="input bg-gray-100">로딩 중...</div>
+            ) : (
+              <select value={formData.placeId} onChange={handlePlaceChange} className="input" required>
+                <option value="">장소를 선택하세요</option>
+                {places.map((place) => (
+                  <option key={place.placeId} value={place.placeId}>
+                    {place.placeName}
+                  </option>
+                ))}
+              </select>
+            )}
+            <p className="text-xs text-gray-500 mt-1">장소를 선택하면 '구역별 지정좌석' 선택 시 구역 정보가 로드됩니다.</p>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">카테고리</label>
+            <select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} className="input">
+              <option value="CONCERT">콘서트</option>
+              <option value="MUSICAL">뮤지컬</option>
+              <option value="THEATER">연극</option>
+              <option value="SPORTS">스포츠</option>
+              <option value="EXHIBITION">전시회</option>
+              <option value="ETC">기타</option>
             </select>
-          )}
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">공연 날짜</label>
+            <input type="datetime-local" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} className="input" required />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">예매 시작 시간</label>
+            <input type="datetime-local" value={formData.ticketingStartAt} onChange={(e) => setFormData({ ...formData, ticketingStartAt: e.target.value })} className="input" required />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">좌석 형태</label>
+            {/* 장소 선택 후에도 좌석 형태를 자유롭게 선택할 수 있도록 disabled 해제 */}
+            <select 
+                value={formData.seatForm} 
+                onChange={handleSeatFormChange} 
+                className="input"
+            >
+              <option value="ASSIGNED">지정좌석</option>
+              <option value="FREE">자유좌석</option>
+              <option value="STANDING">스탠딩</option>
+            </select>
+            <p className="text-xs text-gray-500 mt-1">좌석 형태를 선택하면 아래의 가격 설정 섹션이 달라집니다.</p>
+          </div>
         </div>
+
+        {/* 구역별 가격/등급 설정 (Seat Settings) - 'ASSIGNED'일 때만 표시 */}
+        {isSeatSettingRequired && (
+          <div className="space-y-4">
+            <h3 className="text-xl font-semibold text-gray-800">2. 구역별 가격/등급 설정</h3>
+            <p className="text-sm text-gray-600">장소 템플릿의 구역에 대해 등급(seatLevel)과 가격(price)을 설정합니다.</p>
+            
+            {isSeatSettingDisabled && !loadingSections ? (
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
+                이벤트에 사용할 **장소를 먼저 선택**해주세요.
+              </div>
+            ) : loadingSections ? (
+              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
+                <Loading /> 장소의 구역 정보를 불러오는 중...
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {formData.seatSettings.map((setting, index) => (
+                  <div key={setting.sectionName || index} className="grid grid-cols-5 gap-3 items-center p-3 border rounded-lg bg-white shadow-sm">
+                    <span className="font-bold text-lg text-primary">{index + 1}.</span>
+                    
+                    {/* 구역명: 읽기 전용으로 표시 */}
+                    <div className="col-span-2 space-y-1">
+                      <label className="block text-xs font-medium text-gray-500">구역명</label>
+                      <input
+                        type="text"
+                        value={setting.sectionName}
+                        className="input-sm w-full bg-gray-100 font-semibold"
+                        readOnly
+                      />
+                    </div>
+                    
+                    {/* 좌석 등급 설정 */}
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-gray-500">등급</label>
+                      <select
+                        value={setting.seatLevel}
+                        onChange={(e) => handleSeatSettingChange(index, 'seatLevel', e.target.value)}
+                        className="input-sm w-full"
+                        required
+                      >
+                        {seatLevels.map(level => (
+                          <option key={level} value={level}>{level}</option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    {/* 가격 설정 */}
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-gray-500">가격</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={setting.price}
+                        onChange={(e) => handleSeatSettingChange(index, 'price', e.target.value)}
+                        className="input-sm w-full"
+                        placeholder="0"
+                        required
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">카테고리</label>
-          <select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} className="input">
-            <option value="CONCERT">콘서트</option>
-            <option value="MUSICAL">뮤지컬</option>
-            <option value="THEATER">연극</option>
-            <option value="SPORTS">스포츠</option>
-            <option value="EXHIBITION">전시회</option>
-            <option value="ETC">기타</option>
-          </select>
-        </div>
-        
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">공연 날짜</label>
-          <input type="datetime-local" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} className="input" required />
-        </div>
-        
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">예매 시작 시간</label>
-          <input type="datetime-local" value={formData.ticketingStartAt} onChange={(e) => setFormData({ ...formData, ticketingStartAt: e.target.value })} className="input" required />
-        </div>
-        
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">좌석 형태</label>
-          <select value={formData.seatForm} onChange={(e) => setFormData({ ...formData, seatForm: e.target.value })} className="input">
-            <option value="ASSIGNED">지정좌석</option>
-            <option value="FREE">자유좌석</option>
-            <option value="STANDING">스탠딩</option>
-          </select>
-        </div>
-        
-        <button type="submit" disabled={loading} className="btn-primary w-full">
+        {/* 'ASSIGNED'이 아닐 때 메시지 */}
+        {!isSeatSettingRequired && (
+          <div className="p-4 bg-gray-100 border border-gray-300 rounded-lg text-gray-700 text-sm">
+            선택된 좌석 형태 ({formData.seatForm})는 구역별 가격 설정이 필요하지 않습니다.
+          </div>
+        )}
+
+        <button type="submit" disabled={loading || (isSeatSettingRequired && isSeatSettingDisabled && !loadingSections)} className="btn-primary w-full">
           {loading ? '생성 중...' : '이벤트 생성'}
         </button>
       </form>
-      
-      <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-        <p className="text-sm text-yellow-800">
-          ⚠️ 간단한 폼입니다. 실제로는 좌석 구역별 가격 설정 등 더 상세한 정보가 필요합니다.
-        </p>
-      </div>
     </div>
   );
 }
