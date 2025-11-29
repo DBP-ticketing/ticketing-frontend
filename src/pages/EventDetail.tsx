@@ -56,12 +56,31 @@ export default function EventDetail() {
 
     return date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
+  
+  // 카테고리 Enum 값을 한글 레이블로 변환
+  const getCategoryLabel = (category: string) => {
+    const labels: Record<string, string> = {
+      CONCERT: '콘서트',
+      MUSICAL: '뮤지컬',
+      THEATER: '연극',
+      SPORTS: '스포츠',
+      EXHIBITION: '전시회',
+      ETC: '기타',
+    };
+    return labels[category] || category;
+  };
+
+  // 카테고리 배지의 스타일 클래스
+  const getCategoryBadgeClass = () => {
+    return 'bg-purple-100 text-purple-700';
+  };
 
   const getSeatFormLabel = (seatForm: string) => {
     const labels: Record<string, string> = {
       ASSIGNED: '지정좌석',
       FREE: '자유좌석',
-      STANDING: '스탠딩'
+      STANDING: '스탠딩',
+      SEAT_WITH_SECTION: '구역 지정좌석' 
     };
     return labels[seatForm] || seatForm;
   };
@@ -74,12 +93,24 @@ export default function EventDetail() {
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="card">
           <div className="border-b pb-6 mb-6">
-            <h1 className="text-4xl font-bold text-gray-900 mb-4">{event.eventName}</h1>
+            
+            {/* 이벤트명과 카테고리 배지를 묶는 새로운 flex 컨테이너 */}
+            <div className="flex items-center space-x-4 mb-4">
+              <h1 className="text-4xl font-bold text-gray-900">{event.eventName}</h1>
+              {/* 카테고리 배지 (이벤트명 옆으로 이동) */}
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${getCategoryBadgeClass()}`}>
+                {getCategoryLabel(event.category)}
+              </span>
+            </div>
+            
+            {/* 예매 상태 및 좌석 형태 배지 그룹 */}
             <div className="flex items-center space-x-4">
+              {/* 예매 상태 배지 */}
               <span className={`px-4 py-2 rounded-full text-sm font-medium ${event.status === 'OPEN' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
                 {event.status === 'OPEN' ? '예매 중' : '예매 전'}
               </span>
-              <span className="text-gray-600">{event.category}</span>
+              
+              {/* 좌석 형태 배지 */}
               <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
                 {getSeatFormLabel(event.seatForm)}
               </span>

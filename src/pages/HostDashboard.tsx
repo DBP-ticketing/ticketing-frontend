@@ -9,6 +9,7 @@ import Loading from '../components/Loading';
 // 백엔드 CreateEventRequestDto.java의 SectionSetting과 일치하는 인터페이스 정의
 interface SectionSetting {
   sectionName: string;
+  // 백엔드 SeatLevel.java에 맞춰 string을 포함하도록 수정
   seatLevel: 'VIP' | 'R' | 'S' | 'A' | 'B' | 'DEFAULT' | string; 
   price: number;
 }
@@ -20,7 +21,7 @@ interface CreateEventFormData {
   category: string;
   date: string;
   ticketingStartAt: string;
-  // 백엔드 Enum에 맞게 SeatForm 타입 업데이트
+  // 백엔드 Enum에 맞게 SeatForm 타입 업데이트 (추가적인 값 SEAT_WITH_SECTION이 없다고 가정하고 기존 타입 유지)
   seatForm: 'ASSIGNED' | 'FREE' | 'STANDING';
   seatSettings: SectionSetting[]; // 구역 설정 리스트
 }
@@ -219,16 +220,17 @@ function CreateEventTab() {
   // 장소 선택 변경 핸들러
   const handlePlaceChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newPlaceId = e.target.value;
+    const currentSeatForm = formData.seatForm;
     
-    // 장소 ID 업데이트 및 기존 설정 초기화
+    // 장소 ID 업데이트 및 기존 설정 유지/초기화
     setFormData(prev => ({ 
       ...prev, 
       placeId: newPlaceId, 
-      // 장소가 변경되면 ('ASSIGNED'일 경우) 구역 목록을 다시 로드해야 하므로 초기화
-      seatSettings: prev.seatForm === 'ASSIGNED' ? [] : prev.seatSettings,
+      // ASSIGNED일 경우, 장소에 따라 구역이 바뀌므로 seatSettings를 비웁니다.
+      seatSettings: currentSeatForm === 'ASSIGNED' ? [] : prev.seatSettings,
     }));
 
-    if (newPlaceId && formData.seatForm === 'ASSIGNED') {
+    if (newPlaceId && currentSeatForm === 'ASSIGNED') {
       const id = Number(newPlaceId);
       const sectionNames = await fetchPlaceSections(id);
 
@@ -247,37 +249,51 @@ function CreateEventTab() {
       if (sectionNames.length === 0) {
         toast('선택한 장소에 구역 정보가 없습니다. 장소 설정을 확인해주세요.', { icon: '⚠️' });
       }
-    } else {
-
-        setFormData(prev => ({ ...prev, seatSettings: [] }));
     }
+    
+    // 자유/스탠딩일 경우, 장소 변경과 상관없이 기존의 단일 가격 설정을 유지
+    // (초기 설정은 handleSeatFormChange에서 담당)
   };
 
   // 좌석 형태 변경 핸들러 (새로 추가)
   const handleSeatFormChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newSeatForm = e.target.value as CreateEventFormData['seatForm'];
+    const currentPlaceId = formData.placeId;
+    
+    let initialSettings: SectionSetting[] = [];
+
+    if (newSeatForm === 'FREE' || newSeatForm === 'STANDING') {
+        // FREE 또는 STANDING일 경우, 단일 가격 설정을 위한 기본 객체 생성
+        initialSettings = [{ 
+            sectionName: newSeatForm === 'FREE' ? "자유좌석 전체" : "스탠딩 전체",
+            // FIX: 백엔드 SeatLevel Enum에 포함되지 않은 'DEFAULT' 대신 'A' 사용
+            seatLevel: 'A', // <--- 수정된 부분
+            price: 50000,   // 기본 가격 설정
+        }];
+    }
     
     setFormData(prev => ({ 
         ...prev, 
         seatForm: newSeatForm,
-
-        seatSettings: newSeatForm === 'ASSIGNED' ? prev.seatSettings : [],
+        // FREE/STANDING일 경우 위에서 만든 단일 설정을 사용하고, ASSIGNED일 경우 비웁니다.
+        seatSettings: newSeatForm === 'ASSIGNED' ? [] : initialSettings,
     }));
 
 
-    if (newSeatForm === 'ASSIGNED' && formData.placeId) {
-        const id = Number(formData.placeId);
+    if (newSeatForm === 'ASSIGNED' && currentPlaceId) {
+        const id = Number(currentPlaceId);
         const sectionNames = await fetchPlaceSections(id);
 
-        const initialSettings: SectionSetting[] = sectionNames.map(sectionName => ({
+        const assignedSettings: SectionSetting[] = sectionNames.map(sectionName => ({
             sectionName: sectionName,
             seatLevel: 'S', 
             price: 50000,
         }));
 
+        // 상태를 다시 업데이트할 때, seatForm도 다시 설정하여 race condition을 피합니다.
         setFormData(prev => ({
             ...prev,
-            seatSettings: initialSettings,
+            seatSettings: assignedSettings,
             seatForm: newSeatForm,
         }));
     }
@@ -293,21 +309,39 @@ function CreateEventTab() {
       return;
     }
     
+    // 좌석 설정 관련 유효성 검사
+    const isAssignedSeating = formData.seatForm === 'ASSIGNED';
+    const isSimpleSeating = formData.seatForm === 'FREE' || formData.seatForm === 'STANDING';
 
-    if (formData.seatForm === 'ASSIGNED') {
-      const invalidSetting = formData.seatSettings.some(setting => 
-        !setting.sectionName.trim() || setting.price === null || setting.price === undefined || setting.price < 0
-      );
+    if (isAssignedSeating || isSimpleSeating) {
+        if (formData.seatSettings.length === 0) {
+            toast.error('장소 또는 좌석 형태를 선택하고 가격 설정을 완료해주세요.');
+            return;
+        }
 
-      if (formData.seatSettings.length === 0) {
-        toast.error('장소를 선택하고 구역 정보를 로드한 후, 가격 설정을 완료해주세요.');
-        return;
-      }
+        if (isSimpleSeating) {
+             // 자유/스탠딩은 단일 설정만 허용
+             if (formData.seatSettings.length !== 1) {
+                toast.error('자유좌석/스탠딩 이벤트는 하나의 가격 설정만 허용됩니다. 폼 오류입니다.');
+                return;
+             }
+             const setting = formData.seatSettings[0];
+             if (setting.price === null || setting.price === undefined || setting.price < 0) {
+                toast.error('좌석 가격은 0원 이상으로 필수입니다.');
+                return;
+             }
+        }
 
-      if (invalidSetting) {
-        toast.error('좌석 구역의 등급과 0원 이상의 가격은 필수입니다.');
-        return;
-      }
+        if (isAssignedSeating) {
+            const invalidSetting = formData.seatSettings.some(setting => 
+              !setting.sectionName.trim() || setting.price === null || setting.price === undefined || setting.price < 0
+            );
+      
+            if (invalidSetting) {
+              toast.error('좌석 구역의 등급과 0원 이상의 가격은 필수입니다.');
+              return;
+            }
+        }
     }
 
 
@@ -319,7 +353,7 @@ function CreateEventTab() {
       ticketingStartAt: formData.ticketingStartAt,
       seatForm: formData.seatForm,
 
-      // 백엔드 DTO가 List<SectionSetting>을 요구하므로 빈 배열을 보냅니다.
+      // 백엔드 DTO가 List<SectionSetting>을 요구하므로 준비된 배열을 보냅니다.
       seatSettings: formData.seatSettings,
     };
 
@@ -346,9 +380,14 @@ function CreateEventTab() {
     }
   };
 
-  const isSeatSettingRequired = formData.seatForm === 'ASSIGNED';
-  const isSeatSettingDisabled = !formData.placeId || loadingSections;
-
+  const isAssignedSeating = formData.seatForm === 'ASSIGNED';
+  const isSimpleSeating = formData.seatForm === 'FREE' || formData.seatForm === 'STANDING';
+  // ASSIGNED (구역별 설정) 또는 FREE/STANDING (단일 설정) 모두 설정이 필요합니다.
+  const isSeatSettingRequired = isAssignedSeating || isSimpleSeating;
+  // isSeatSettingDisabled는 ASSIGNED일 때만 장소 선택 여부/로딩 상태에 영향을 받습니다.
+  const isSeatSettingDisabled = isAssignedSeating && (!formData.placeId || loadingSections);
+  
+  // FREE/STANDING일 때는 장소 ID가 필수는 아니지만, 백엔드 로직상 이벤트 생성 시 placeId는 항상 필수입니다.
 
   return (
     <div className="card">
@@ -376,7 +415,7 @@ function CreateEventTab() {
                 ))}
               </select>
             )}
-            <p className="text-xs text-gray-500 mt-1">장소를 선택하면 '구역별 지정좌석' 선택 시 구역 정보가 로드됩니다.</p>
+            <p className="text-xs text-gray-500 mt-1">장소를 선택하면 '지정좌석' 선택 시 구역 정보가 로드됩니다.</p>
           </div>
           
           <div>
@@ -403,94 +442,129 @@ function CreateEventTab() {
           
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">좌석 형태</label>
-            {/* 장소 선택 후에도 좌석 형태를 자유롭게 선택할 수 있도록 disabled 해제 */}
             <select 
                 value={formData.seatForm} 
                 onChange={handleSeatFormChange} 
                 className="input"
             >
-              <option value="ASSIGNED">지정좌석</option>
-              <option value="FREE">자유좌석</option>
-              <option value="STANDING">스탠딩</option>
+              <option value="ASSIGNED">지정좌석 (구역별 등급/가격)</option>
+              <option value="FREE">자유좌석 (전체 동일 가격)</option>
+              <option value="STANDING">스탠딩 (전체 동일 가격)</option>
             </select>
-            <p className="text-xs text-gray-500 mt-1">좌석 형태를 선택하면 아래의 가격 설정 섹션이 달라집니다.</p>
+            <p className="text-xs text-gray-500 mt-1">좌석 형태에 따라 아래의 가격 설정 섹션이 달라집니다.</p>
           </div>
         </div>
 
-        {/* 구역별 가격/등급 설정 (Seat Settings) - 'ASSIGNED'일 때만 표시 */}
+        {/* 2. 가격/등급 설정 (공통) */}
         {isSeatSettingRequired && (
           <div className="space-y-4">
-            <h3 className="text-xl font-semibold text-gray-800">2. 구역별 가격/등급 설정</h3>
-            <p className="text-sm text-gray-600">장소 템플릿의 구역에 대해 등급(seatLevel)과 가격(price)을 설정합니다.</p>
-            
-            {isSeatSettingDisabled && !loadingSections ? (
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
-                이벤트에 사용할 **장소를 먼저 선택**해주세요.
-              </div>
-            ) : loadingSections ? (
-              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
-                <Loading /> 장소의 구역 정보를 불러오는 중...
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {formData.seatSettings.map((setting, index) => (
-                  <div key={setting.sectionName || index} className="grid grid-cols-5 gap-3 items-center p-3 border rounded-lg bg-white shadow-sm">
-                    <span className="font-bold text-lg text-primary">{index + 1}.</span>
-                    
-                    {/* 구역명: 읽기 전용으로 표시 */}
-                    <div className="col-span-2 space-y-1">
-                      <label className="block text-xs font-medium text-gray-500">구역명</label>
-                      <input
-                        type="text"
-                        value={setting.sectionName}
-                        className="input-sm w-full bg-gray-100 font-semibold"
-                        readOnly
-                      />
-                    </div>
-                    
-                    {/* 좌석 등급 설정 */}
-                    <div className="space-y-1">
-                      <label className="block text-xs font-medium text-gray-500">등급</label>
-                      <select
-                        value={setting.seatLevel}
-                        onChange={(e) => handleSeatSettingChange(index, 'seatLevel', e.target.value)}
-                        className="input-sm w-full"
-                        required
-                      >
-                        {seatLevels.map(level => (
-                          <option key={level} value={level}>{level}</option>
-                        ))}
-                      </select>
-                    </div>
-                    
-                    {/* 가격 설정 */}
-                    <div className="space-y-1">
-                      <label className="block text-xs font-medium text-gray-500">가격</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={setting.price}
-                        onChange={(e) => handleSeatSettingChange(index, 'price', e.target.value)}
-                        className="input-sm w-full"
-                        placeholder="0"
-                        required
-                      />
-                    </div>
+            <h3 className="text-xl font-semibold text-gray-800">2. {isAssignedSeating ? '구역별 가격/등급 설정' : '단일 가격 설정 (등급 없음)'}</h3>
+
+            {/* ASSIGNED 좌석 (구역별 등급/가격) */}
+            {isAssignedSeating && (
+              <>
+                <p className="text-sm text-gray-600">장소 템플릿의 구역에 대해 등급(seatLevel)과 가격(price)을 설정합니다.</p>
+                
+                {isSeatSettingDisabled && !loadingSections ? (
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
+                    이벤트에 사용할 장소를 먼저 선택해주세요.
                   </div>
-                ))}
+                ) : loadingSections ? (
+                  <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
+                    <Loading /> 장소의 구역 정보를 불러오는 중...
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {formData.seatSettings.map((setting, index) => (
+                      <div key={setting.sectionName || index} className="grid grid-cols-5 gap-3 items-center p-3 border rounded-lg bg-white shadow-sm">
+                        <span className="font-bold text-lg text-primary">{index + 1}.</span>
+                        
+                        {/* 구역명: 읽기 전용으로 표시 */}
+                        <div className="col-span-2 space-y-1">
+                          <label className="block text-xs font-medium text-gray-500">구역명</label>
+                          <input
+                            type="text"
+                            value={setting.sectionName}
+                            className="input-sm w-full bg-gray-100 font-semibold"
+                            readOnly
+                          />
+                        </div>
+                        
+                        {/* 좌석 등급 설정 */}
+                        <div className="space-y-1">
+                          <label className="block text-xs font-medium text-gray-500">등급</label>
+                          <select
+                            value={setting.seatLevel}
+                            onChange={(e) => handleSeatSettingChange(index, 'seatLevel', e.target.value)}
+                            className="input-sm w-full"
+                            required
+                          >
+                            {seatLevels.map(level => (
+                              <option key={level} value={level}>{level}</option>
+                            ))}
+                          </select>
+                        </div>
+                        
+                        {/* 가격 설정 */}
+                        <div className="space-y-1">
+                          <label className="block text-xs font-medium text-gray-500">가격</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={setting.price}
+                            onChange={(e) => handleSeatSettingChange(index, 'price', e.target.value)}
+                            className="input-sm w-full"
+                            placeholder="0"
+                            required
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* FREE / STANDING 좌석 (단일 가격) */}
+            {isSimpleSeating && formData.seatSettings.length === 1 && (
+                <>
+                    <p className="text-sm text-gray-600">이벤트 전체 좌석에 적용할 동일한 가격을 설정합니다. (등급 없음)</p>
+                    <div className="grid grid-cols-5 gap-3 items-center p-6 border rounded-lg bg-white shadow-md">
+                        <span className="font-bold text-lg text-primary col-span-2">전체 좌석</span>
+                        
+                        <div className="col-span-3 space-y-1">
+                            <label className="block text-xs font-medium text-gray-500">가격 (원)</label>
+                            <input
+                                type="number"
+                                min="0"
+                                value={formData.seatSettings[0].price}
+                                // 단일 설정이므로 index 0에만 가격을 설정합니다. (등급은 백엔드에서 null 처리됨)
+                                onChange={(e) => handleSeatSettingChange(0, 'price', e.target.value)}
+                                className="input-sm w-full input"
+                                placeholder="0"
+                                required
+                            />
+                        </div>
+                    </div>
+                    {formData.seatForm === 'FREE' && 
+                        <p className="text-xs text-gray-500 mt-1">자유좌석의 경우, 사용자는 구역에 상관없이 이 가격으로 예매합니다.</p>
+                    }
+                    {formData.seatForm === 'STANDING' && 
+                        <p className="text-xs text-gray-500 mt-1">스탠딩의 경우, 사용자는 구역에 상관없이 이 가격으로 예매합니다.</p>
+                    }
+                </>
+            )}
+            
+            {/* 좌석 형태가 지정되었는데 설정 데이터가 비어있을 경우 (오류 메시지) */}
+            {(isAssignedSeating && formData.seatSettings.length === 0 && !isSeatSettingDisabled) && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
+                장소 선택 후 구역 정보를 로드하지 못했거나, 장소에 템플릿이 없습니다.
               </div>
             )}
           </div>
         )}
         
-        {/* 'ASSIGNED'이 아닐 때 메시지 */}
-        {!isSeatSettingRequired && (
-          <div className="p-4 bg-gray-100 border border-gray-300 rounded-lg text-gray-700 text-sm">
-            선택된 좌석 형태 ({formData.seatForm})는 구역별 가격 설정이 필요하지 않습니다.
-          </div>
-        )}
-
-        <button type="submit" disabled={loading || (isSeatSettingRequired && isSeatSettingDisabled && !loadingSections)} className="btn-primary w-full">
+        <button type="submit" disabled={loading || (isAssignedSeating && isSeatSettingDisabled && !loadingSections)} className="btn-primary w-full">
           {loading ? '생성 중...' : '이벤트 생성'}
         </button>
       </form>

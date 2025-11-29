@@ -104,9 +104,27 @@ export default function BookingDetail() {
       </span>
     );
   };
+  
+  // 좌석 형태를 한글 레이블로 변환하는 함수
+  const getSeatFormLabel = (form: Booking['seatForm'] | undefined) => {
+    switch (form) {
+      case 'ASSIGNED':
+      case 'SEAT_WITH_SECTION':
+        return '지정좌석';
+      case 'FREE':
+        return '자유좌석';
+      case 'STANDING':
+        return '스탠딩';
+      default:
+        return '좌석 형태 불명';
+    }
+  };
 
   if (loading) return <Loading />;
   if (!booking) return null;
+
+  // 지정좌석 여부 판별
+  const isAssignedSeat = booking.seatForm === 'ASSIGNED' || booking.seatForm === 'SEAT_WITH_SECTION';
 
   return (
     <div className="min-h-screen bg-gray-50 py-12">
@@ -140,14 +158,29 @@ export default function BookingDetail() {
               <div>
                 <h3 className="text-sm font-medium text-gray-500 mb-2">좌석 정보</h3>
                 <div className="bg-gray-50 rounded-lg p-4">
+                  {/* 좌석 형태 표시 */}
+                  <p className="text-sm font-medium text-gray-500 mb-2">
+                    형태: <span className="text-gray-900 font-semibold">{getSeatFormLabel(booking.seatForm)}</span>
+                  </p>
+
                   <p className="text-lg font-semibold text-gray-900">
-                    {booking.section}
-                    {booking.seatRow && booking.seatCol && (
+                    {/* 지정좌석일 때만 구역을 표시합니다. FREE/STANDING일 경우 백엔드에서 null을 보내므로 표시되지 않습니다. */}
+                    {booking.section} 
+                    
+                    {/* 지정 좌석 형태이고 행/열 정보가 있을 때만 표시 */}
+                    {isAssignedSeat && booking.seatRow && booking.seatCol && (
                       <span className="ml-2 text-gray-600">
                         {booking.seatRow}행 {booking.seatCol}열
                       </span>
                     )}
                   </p>
+                  
+                  {/* 자유좌석/스탠딩일 때 추가 설명 */}
+                  {!isAssignedSeat && (
+                     <p className="text-sm text-gray-600 mt-1">
+                         * {getSeatFormLabel(booking.seatForm)}은 좌석 번호가 지정되지 않습니다.
+                     </p>
+                  )}
                 </div>
               </div>
 

@@ -36,6 +36,7 @@ export interface Booking {
   section: string;
   seatRow?: number;
   seatCol?: number;
+  seatForm?: 'ASSIGNED' | 'FREE' | 'STANDING' | 'SEAT_WITH_SECTION';
   price: number;
   status: 'PENDING' | 'CONFIRMED' | 'CANCELLED';
 }
